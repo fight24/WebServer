@@ -31,7 +31,7 @@ COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy tất cả các tệp trong thư mục hiện tại vào /app
-COPY . /app/
+COPY ./app /app/
 
 # Mở cổng 8000 để có thể truy cập ứng dụng từ bên ngoài container
 EXPOSE 8000

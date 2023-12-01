@@ -21,15 +21,23 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///wemeio.db'
 
 cred = credentials.Certificate("key.json")
 firebase_admin.initialize_app(cred)
-last_message_time = 0
+
 db.init_app(app)
 bcrypt.init_app(app)
-subscribed = set()
-my_token_dict = {}
-device_dict ={}
-location_device = {}
+# Đặt sự kiện để báo hiệu thay đổi trong my_token_dict
+my_dict = {}
+my_dict["subscribed"] = set()
+my_dict["my_check_status"] ={}
+my_dict["location_device"] ={}
+my_dict ["tokens"]= {}
 with app.app_context():
      db.create_all()
+     tokens = Token.query.all()
+     devices = Device.query.all()
+     for device in devices :
+         my_dict["my_check_status"][device.code] = 0
+     for token in tokens :
+         my_dict ["tokens"][token.user_id] = token.token_value
 # Path mặc định
 distance_default = 100
 
@@ -55,7 +63,7 @@ app.register_blueprint(devices_bp)
 app.register_blueprint(relationShip_bp)
 
 
-app.config['MQTT_BROKER_URL'] = 'namcu.ddns.net'  # Thay đổi địa chỉ và cổng của MQTT broker
+app.config['MQTT_BROKER_URL'] = 'petweioapp.online'  # Thay đổi địa chỉ và cổng của MQTT broker
 app.config['MQTT_BROKER_PORT'] = 1883
 app.config['MQTT_CLIENT_ID'] = 'SERVER_PRO_MAX'
 # app.config['MQTT_USERNAME'] = 'nam'
@@ -65,32 +73,15 @@ device_name_check = ''
 mqtt = Mqtt()
 mqtt.init_app(app)
 mqtt_client=mqtt.client
-mqtt_client.username_pw_set('nam',password='nam')
+mqtt_client.username_pw_set('admin24',password='admin24')
 waiting_time = 5
-# app.app_context().push()
-# # Hàm nền để theo dõi MQTT
-# def mqtt_thread():
-#     # Kết nối đến MQTT broker
-#     mqtt.client.connect(mqtt.broker_url, mqtt.broker_port)
-#     # Đăng ký các chủ đề bạn quan tâm
-    
-    
-#     # Lắng nghe tin nhắn MQTT
-#     while True:
-#         mqtt.client.loop()
-#         mqtt.client.on_message = on_message
-#         # Xử lý tin nhắn ở đây, ví dụ:
-#         # mqtt.publish("response_topic", "Hello from MQTT thread")
+
 # # Bắt đầu luồng MQTT
 def mqtt_thread():
     mqtt.client.connect(mqtt.broker_url, mqtt.broker_port)
 mqtt_thread = threading.Thread(target=mqtt_thread)
-def check_thread(device_dict):
-    schedule.every(10).seconds.do(check_device_status,device_dict=device_dict)
-    while True:
-        schedule.run_pending()
-        time.sleep(1)
-check_thread = threading.Thread(target=check_thread,args=(device_dict,))
+
+
 def save_data(device_code,topic,payload,time):
     with app.app_context():      
         device = Device.query.filter_by(code=device_code).first()
@@ -110,18 +101,19 @@ def subscribe_to_all():
                 # Truy vấn danh sách tất cả các mã thiết bị
                 devices = Device.query.all()
                 for device in devices:
-                    if device.code not in subscribed:
+                    if device.code not in my_dict["subscribed"]:
                         topic = f"devices/{device.code}"
                         mqtt.client.subscribe(topic)
                         mqtt.client.subscribe(f"devices-receive/{device.code}")
-                        subscribed.add(device.code)
-                        device_dict[device.id] =device.code
+                        my_dict["subscribed"].add(device.code)
                 tokens = Token.query.all()
                 for token in tokens:
-                    if token.token_value not in subscribed:
+                    if token.token_value not in my_dict["subscribed"]:
                         topic = f"user/{token.token_value}"
                         mqtt.client.subscribe(topic)
-                        subscribed.add(token.token_value)
+                        my_dict["subscribed"].add(token.token_value)
+                        my_dict ["tokens"][token.user_id] = token.token_value
+                        
 
 
 
@@ -131,21 +123,20 @@ def device_added(mapper, connection, target):
     print(f"New device added with code {target.code}")
     # Sau khi thêm thiết bị mới, subscribe vào chủ đề tương ứng
     topic = f"devices/{target.code}"
-    if target.code not in subscribed:
+    if target.code not in my_dict["subscribed"]:
         mqtt.client.subscribe(f"devices-receive/{target.code}")
         mqtt.client.subscribe(topic)
-        subscribed.add(target.code)
-        device_dict[target.id] =target.code
+        my_dict["subscribed"].add(target.code)
+        
 
 @db.event.listens_for(Device, 'after_delete')
 def device_deleted(mapper, connection, target):
     print(f"Device deleted with code {target.code}")
     topic = f"devices/{target.code}"
-    if target.code in subscribed:
+    if target.code in my_dict["subscribed"]:
         mqtt.client.unsubscribe(f"devices-receive/{target.code}")
         mqtt.client.unsubscribe(topic)
-        del device_dict[target.id]
-        subscribed.remove(target.code)
+        my_dict["subscribed"].remove(target.code)
 
 # lang nghe su kien tu bang token
 @db.event.listens_for(Token, 'after_insert')
@@ -153,28 +144,25 @@ def device_added(mapper, connection, target):
     print(f"New token added with id {target.id} with {target.user_id}")
     # Sau khi thêm thiết bị mới, subscribe vào chủ đề tương ứng
     topic = f"user/{target.token_value}"
-    if target.token_value not in subscribed:
+    global my_dict
+
+    if target.token_value not in my_dict["subscribed"]:
         mqtt.client.subscribe(topic)
-        subscribed.add(target.token_value)
+        my_dict["subscribed"].add(target.token_value)
+        my_dict ["tokens"][target.user_id] = target.token_value
+        schedule.every(10).seconds.do(lambda: check_device_status(target.token_value)).tag(target.token_value,target.token_value)
+
 @db.event.listens_for(Token, 'after_delete')
 def device_deleted(mapper, connection, target):
     print(f"Token deleted with id {target.id}")
     topic = f"user/{target.token_value}"
-    if target.token_value in subscribed:
+    global my_dict
+
+    if target.token_value in my_dict["subscribed"]:
         mqtt.client.unsubscribe(topic)
-        subscribed.remove(target.token_value)
-# @db.event.listens_for(User.token, 'set', named=True)
-# def user_name_changed(target, value, oldvalue, initiator):
-#     # Xử lý sự kiện thay đổi thuộc tính 'name' trong model 'User'
-#     print(f"Thuộc tính 'token của {target.username} đã thay đổi ")
-#     if value is not None :
-#         topic = f"user/{value}"
-#         mqtt.client.subscribe(topic)
-#         subscribed.add(value)
-#     else:
-#         topic = f"user/{oldvalue}"
-#         mqtt.client.unsubscribe(topic)
-#         subscribed.remove(oldvalue)
+        my_dict["subscribed"].remove(target.token_value)
+        del my_dict ["tokens"][target.user_id]
+        schedule.clear(target.token_value)
 @mqtt.on_connect()
 def handle_connect(client, userdata, flags, rc):
     if rc == 0:
@@ -187,22 +175,20 @@ def handle_connect(client, userdata, flags, rc):
 @mqtt.on_message()
 def handle_message(client, userdata, message):
     warning_device_check =[]
-    
     topic = message.topic
     payload = message.payload.decode('utf-8')
     # Xử lý thông điệp dựa trên chủ đề
-
     if "devices-receive/" in topic:
-        device_id = topic.split("/")[0]
-        global last_message_time
-        last_message_time = time.time()  # Cập nhật thời điểm nhận được tin nhắn
-        print(f"Received message '{message.payload.decode()}' on id '{device_id}'")
+        device_code = topic.split("/")[-1]
+       
+        global my_dict
+        # Cập nhật thời điểm nhận được tin nhắn
+        my_dict["my_check_status"][device_code] = time.time()
     if "devices/" in topic:
         # Xử lý thông điệp từ thiết bị
         device_code = topic.split("/")[-1]
-        
-        location_device[search_name_device_by_name(device_code)] = cut_str_of_payload(payload)
-        print(location_device)
+        my_dict["location_device"][search_name_device_by_name(device_code)] = cut_str_of_payload(payload)
+
     # Tìm thiết bị tương ứng hoặc tạo mới nếu chưa tồn tại
         try:
             date_time = datetime.now()
@@ -213,34 +199,32 @@ def handle_message(client, userdata, message):
     if "user/" in topic:
         user_token = topic.split("/")[-1]
         print(user_token)
-       
-        warning_device_check = search_device__by_token(user_token)
+        warning_device_check = search_device__by_token_warning(user_token)
         if len(warning_device_check) > 0 and warning_device_check is not None:
-            my_token_dict[user_token] = [cut_str_of_payload(payload),warning_device_check]
-        # if topic not in subscribed:
-        #     mqtt_client.unsubscribe(topic)
-        # Xử lý thông điệp từ người dùng
+            my_dict["user_token"][user_token] = [cut_str_of_payload(payload),warning_device_check]
         print(f"Message from user topic '{topic}': {payload}")
-    # Xử lý thông điệp từ chủ đề khác (nếu cần)
-    # print(f"Message from unknown topic '{topic}': {payload}")
-    # Đặt thời gian chờ (ví dụ: 5 giây)
-    # Tạo một Timer để gọi hàm my_function sau thời gian waiting_time
- 
-    if len(warning_device_check) > 0 and warning_device_check is not None:
+    handle_notify(warning_device_check)
+  
+    timer = threading.Timer(360000,auto_delete_properties)
+    # timer.start()
+
+def handle_notify(warning_device_check):
+      if len(warning_device_check) > 0 and warning_device_check is not None:
         # Tạo một từ điển mới để lưu trữ thông tin vị trí của từng thiết bị của mỗi người dùng
         user_location_dict = {}
 
         # Lặp qua từ điển my_token_dict
-        for key, value in my_token_dict.items():
+        for key, value in my_dict["user_token"].items():
             user_value, devices = value
             print(f"User: '{key}', User value: {user_value}")
             print(f"User: '{key}', devices: {devices}")
             # Lặp qua từng thiết bị trong set devices
             for device in devices:
                 # Kiểm tra xem thiết bị có trong từ điển location_device không
-                if device in location_device:
+                if device in my_dict["location_device"]:
                     # Lấy thông tin vị trí của thiết bị và lưu vào user_location_dict
-                    user_location_dict[device] = location_device[device]
+                    user_location_dict[device] = my_dict["location_device"][device]
+                    location_device=my_dict["location_device"]
                     print(f"Device: '{device}', Location: {location_device[device]}")
                     print(f" User: '{key}', User lat: {user_value[0]}, User lng: {user_value[1]}, Device: '{device}', Lat: {location_device[device][0]},Lng: {location_device[device][1]}")
                     distance = haversine(user_value[0],user_value[1],location_device[device][0],location_device[device][1])
@@ -250,18 +234,11 @@ def handle_message(client, userdata, message):
                     # t.start
                     with app.app_context():
                         search_device = Device.query.filter_by(name=device).first()
+                        if search_device.is_status:
+                            send_status_alert(key,device)
                         send_distance_alert(key,device,distance,search_device.distance)
                 else:
                     print(f"Device: '{device}' not found in location_device dictionary")
-
-        # for key, value in my_token_dict.items():
-        #     print(f"dict user: '{key}': {value}")
-        #     for v in value[1]:
-        #         print(f"dict user: '{key}': {location_device[{v}]}")
-                # for k,va in location_device.items():
-                #     print(f"dict user: '{k}': {va}")
-    timer = threading.Timer(360000,auto_delete_properties)
-    # timer.start()
 def auto_delete_properties() :
     with app.app_context():
         try:
@@ -400,7 +377,7 @@ def search_name_device_by_name(code):
             if devices.is_warning:
                 name = devices.name
         return name
-def search_device__by_token(token_value):
+def search_device__by_token_warning(token_value):
     with app.app_context():
         tokens = Token.query.filter_by(token_value=token_value).first()
         id_user = tokens.user_id
@@ -415,34 +392,95 @@ def search_device__by_token(token_value):
             if device.is_warning:
                 warning_device_names.append(device.name)
         return warning_device_names
-def check_esp32_status(key):
-    global last_message_time
+def search_code_device_by_token(token_value):
+    with app.app_context():
+        tokens = Token.query.filter_by(token_value=token_value).first()
+        id_user = tokens.user_id
+        print(id_user)
+        user = User.query.get(id_user)
+        devices = user.devices
+        if user is None:
+            return None
+        device_codes = []
+        for device in devices:
+            device_codes.append(device.code)
+        return device_codes
+def check_device_location_status(key):
+    
     current_time = time.time()
-    time_since_last_message = current_time - last_message_time
-
+    time_since_last_message = current_time - my_dict["my_check_status"][key]
     if time_since_last_message > 20:  # Kiểm tra sau 10 giây không có tin nhắn
-        print(f"{key} is not active.")
+        # with app.app_context():
+        #     device = Device.query.filter_by(code=key).first()
+        #     if device.is_status:
+        #         device.is_status = False
+        #         db.session.commit()
+        print(f"{key} is not active.")       
     else:
+        # with app.app_context():
+        #     device = Device.query.filter_by(code=key).first()
+        #     if not device.is_status:
+        #         device.is_status = True
+        #         db.session.commit()
         print(f"{key} is active.")
-def check_device_status(device_dict):
+def check_device_status(user_token):
     # Thực hiện kiểm tra trạng thái thiết bị ở đây
     print(f"Checking device status...")
     # TODO: Thêm mã kiểm tra trạng thái thiết bị của bạn ở đây
-    if device_dict is not None:
-        for key,value in device_dict.items():
-            print(f"key: {key} - value: {value}")
-            mqtt.client.publish(f"devices-ping/{value}","Hi! Esp32")
+    device_set = search_code_device_by_token(user_token)
+    if device_set is not None:
+        for value in device_set:
+            print(f"value: {value}")
+            mqtt.client.publish(f"devices-ping/{value}",f"Hi! device {value}")
             try:
-                check_esp32_status(value)
+                check_device_location_status(value)
             except Exception as e:
                 print(f"Error: {e}")
-        # Lên lịch cho lần kiểm tra tiếp theo
-# Đặt lịch cho lần đầu tiên
-mqtt_thread.daemon = True  # Đánh dấu luồng như là một daemon (sẽ dừng khi ứng dụng Flask kết thúc)
 
-check_thread.daemon = True
+def check_thread(value):
+    schedule.every(10).seconds.do(lambda: check_device_status(value)).tag(value,value)
+def check_thead_full():
+    print("check_thead_full")
+    check_threads = []
+    # stop_event = threading.Event()
+    # Bắt đầu một luồng cho mỗi user_token
+    if my_dict is not None:
+        for key, value in my_dict["tokens"].items():
+            check_thread(value)
+    # Chờ tất cả các luồng hoàn thành
+    # try:
+    #     for thread in check_threads:
+    #         thread.join()
+    # finally:
+    #     stop_event.set()
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+
+# Bắt đầu một luồng cho hàm lắng nghe sự kiện thay đổi trong my_token_dict
+# Bắt đầu luồng chính cho hàm check_thead_full
+check_full_thread = threading.Thread(target=check_thead_full)
+check_thead_full.daemon = True
+check_full_thread.start()
+mqtt_thread.daemon = True  # Đánh dấu luồng như là một daemon (sẽ dừng khi ứng dụng Flask kết thúc)
 mqtt_thread.start()
 
-check_thread.start()
-
+def send_status_alert(user_token,device_name):
+    print('send status alert')
+     # Khoảng cách vượt quá ngưỡng, gửi thông báo
+    message = messaging.Message(
+            notification=messaging.Notification(
+                title="Distance warning",
+                body=f"The  {device_name} is not active.",
+            ),
+            token=user_token,
+        )
+    try:
+            response = messaging.send(message)
+            print('send_distance_alert: Successfully sent message:', response)
+    except Exception as e:
+            print('send_distance_alert: Error sending message:', str(e))
     
+    
+
