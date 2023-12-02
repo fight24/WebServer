@@ -18,7 +18,7 @@ def get_user_devices(user_id):
         return jsonify({'message': 'User not found'}), 404
     
     devices = user.devices
-    device_list = [{'id': device.id, 'name': device.name,'code': device.code,'type': device.type,'is_warning': device.is_warning,'image_name':device.image_name} for device in devices]
+    device_list = [{'id': device.id, 'name': device.name,'code': device.code,'type': device.type,'is_warning': device.is_warning,'is_status':device.is_status,'image_name':device.image_name} for device in devices]
 
     return jsonify(device_list)
 @relationShip_bp.route('/user/<string:username>/devices', methods=['GET'])
@@ -72,7 +72,8 @@ def get_users_with_devices():
                 'code': device.code,
                 'type':  device.type,
                 'is_warning':  device.is_warning,
-                'image_name':device.image_name
+                'image_name':device.image_name,
+                'is_status':device.is_status
                 
             })
 
@@ -221,3 +222,34 @@ def remove_device_from_user_by_name(username):
     else:
         return jsonify({'message': 'Device is not associated with this user'}), 400
 
+
+@relationShip_bp.route('/remove-device-from-user/<string:username>/<string:device_code>', methods=['DELETE'])
+def remove_device_from_user_by_code(username,device_code):
+    users = User.query.all()
+    user_list = [{'id': user.id, 'username': user.username, 'email':user.email,'password':mask_string(user.password),'img_user':user.img_user} for user in users if user.username == username]
+    if not user_list :
+        return jsonify({'message':'None'}),404
+    user = user_list[0]
+    # Truy cập các trường thông tin trong từ điển
+    user_id = user['id']
+    user = User.query.get(user_id)
+    if user is None:
+        return jsonify({'message': 'User not found'}), 404
+
+    devices = Device.query.all()
+    device_list = [{'id': device.id, 'name': device.name, 'code':device.code,'type':device.type,'image_name':device.image_name} for device in devices if device.code == device_code]
+    if not device_list :
+        return jsonify({'message':'None'}),404
+    device = device_list[0]
+    device_id = device['id']
+    device = Device.query.get(device_id)
+
+    if device is None:
+        return jsonify({'message': 'Device not found'}), 404
+
+    if user in device.users:
+        device.users.remove(user)
+        db.session.commit()
+        return jsonify({'message': 'Device removed from user successfully'}), 200
+    else:
+        return jsonify({'message': 'Device is not associated with this user'}), 400

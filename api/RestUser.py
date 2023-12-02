@@ -65,15 +65,15 @@ def delete_user(user_id):
 def login():
     data = request.get_json()
     user = User.query.filter_by(username=data['username']).first()
-    token = Token.query.filter_by(user_id=user.id).first()
-    if token:
-        # Xóa token
-        db.session.delete(token)
-        db.session.commit()
-    token = Token(user=user, token_value=data['token'])
-    db.session.add(token)
-    db.session.commit()
     if user and bcrypt.check_password_hash(user.password, data['password']):
+        token = Token.query.filter_by(user_id=user.id).first()
+        if token:
+            # Xóa token
+            db.session.delete(token)
+            db.session.commit()
+        token = Token(user=user, token_value=data['token'])
+        db.session.add(token)
+        db.session.commit()
         return jsonify({'message': 'Login successful'}), 200
     else:
         return jsonify({'message': 'Login failed'}), 401

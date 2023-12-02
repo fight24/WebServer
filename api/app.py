@@ -234,7 +234,7 @@ def handle_notify(warning_device_check):
                     # t.start
                     with app.app_context():
                         search_device = Device.query.filter_by(name=device).first()
-                        if search_device.is_status:
+                        if not search_device.is_status:
                             send_status_alert(key,device)
                         send_distance_alert(key,device,distance,search_device.distance)
                 else:
@@ -410,18 +410,18 @@ def check_device_location_status(key):
     current_time = time.time()
     time_since_last_message = current_time - my_dict["my_check_status"][key]
     if time_since_last_message > 20:  # Kiểm tra sau 10 giây không có tin nhắn
-        # with app.app_context():
-        #     device = Device.query.filter_by(code=key).first()
-        #     if device.is_status:
-        #         device.is_status = False
-        #         db.session.commit()
+        with app.app_context():
+            device = Device.query.filter_by(code=key).first()
+            if device.is_status:
+                device.is_status = False
+                db.session.commit()
         print(f"{key} is not active.")       
     else:
-        # with app.app_context():
-        #     device = Device.query.filter_by(code=key).first()
-        #     if not device.is_status:
-        #         device.is_status = True
-        #         db.session.commit()
+        with app.app_context():
+            device = Device.query.filter_by(code=key).first()
+            if not device.is_status:
+                device.is_status = True
+                db.session.commit()
         print(f"{key} is active.")
 def check_device_status(user_token):
     # Thực hiện kiểm tra trạng thái thiết bị ở đây
@@ -483,4 +483,3 @@ def send_status_alert(user_token,device_name):
             print('send_distance_alert: Error sending message:', str(e))
     
     
-
