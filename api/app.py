@@ -39,24 +39,29 @@ with app.app_context():
      for token in tokens :
          my_dict ["tokens"][token.user_id] = token.token_value
 # Path mặc định
-distance_default = 100
+#distance_default = 100
 
-default_path = '/api'
+#default_path = '/api'
 # Middleware để thêm path mặc định vào tất cả các yêu cầu
 valid_api_key = "api_promax"
-@app.before_request
-def add_default_path():
-    if not request.path.startswith(default_path):
-        request.path = default_path + request.path
-@app.before_request
-def check_api_key():
-    api_key = request.headers.get('X-API-Key')
-    if api_key != valid_api_key:
-        return jsonify({"message": "Unauthorized"}), 401
+#@app.before_request
+#def add_default_path():
+#    if not request.path.startswith(default_path):
+#        request.path = default_path + request.path
+#@app.before_request
+#def check_api_key():
+#    api_key = request.headers.get('X-API-Key')
+#    if api_key != valid_api_key:
+#        return jsonify({"message": "Unauthorized"}), 401
 
 # Middleware để kiểm tra khóa API trước khi xử lý bất kỳ yêu cầu nào trong module
 
-
+@app.before_request
+def check_api_key():
+    if request.path.startswith('/api'):
+        api_key = request.headers.get('X-API-Key')
+        if api_key != valid_api_key:
+            return jsonify({"message": "Unauthorized"}), 401
 
 app.register_blueprint(users_bp)
 app.register_blueprint(devices_bp)
@@ -184,6 +189,7 @@ def handle_message(client, userdata, message):
         global my_dict
         # Cập nhật thời điểm nhận được tin nhắn
         my_dict["my_check_status"][device_code] = time.time()
+        print(f"time: {my_dict['my_check_status'][device_code]}")
     if "devices/" in topic:
         # Xử lý thông điệp từ thiết bị
         device_code = topic.split("/")[-1]
@@ -406,9 +412,9 @@ def search_code_device_by_token(token_value):
             device_codes.append(device.code)
         return device_codes
 def check_device_location_status(key):
-    
+    print(f"check_device_location_status {my_dict['my_check_status'][key]}")
     current_time = time.time()
-    time_since_last_message = current_time - my_dict["my_check_status"][key]
+    time_since_last_message = current_time - my_dict['my_check_status'][key]
     if time_since_last_message > 20:  # Kiểm tra sau 10 giây không có tin nhắn
         with app.app_context():
             device = Device.query.filter_by(code=key).first()
