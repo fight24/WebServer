@@ -24,6 +24,9 @@ def get_all_users():
 def create_user():
     data = request.get_json()
     username = data['username']
+    user = User.query.filter_by(username=username)
+    if user:
+        return jsonify({'message': 'User exist'}), 404
     email = data['email']
     password = data['password']
     hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
