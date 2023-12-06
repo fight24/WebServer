@@ -1,0 +1,4 @@
+[2023-12-06 13:17:10 +0700] [56952] [INFO] Starting gunicorn 21.2.0
+[2023-12-06 13:17:10 +0700] [56952] [INFO] Listening at: http://127.0.0.1:8000 (56952)
+[2023-12-06 13:17:10 +0700] [56952] [INFO] Using worker: sync
+[2023-12-06 13:17:10 +0700] [56953] [INFO] Booting worker with pid: 56953

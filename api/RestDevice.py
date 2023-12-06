@@ -55,6 +55,8 @@ def update_device_info(device_id):
 @devices_bp.route('/device/<int:device_id>/image', methods=['PUT'])
 def update_image_device(device_id):
     device = Device.query.get_or_404(device_id)
+    if not device:
+        return jsonify({'message': 'device none'}), 404
     data = request.get_json()
     device.image_name = data['image_name']
     db.session.commit()
@@ -62,6 +64,19 @@ def update_image_device(device_id):
 @devices_bp.route('/device/<int:device_id>/distance', methods=['PUT'])
 def update_distance_device(device_id):
     device = Device.query.get_or_404(device_id)
+    if not device:
+        return jsonify({'message': 'device none'}), 404
+
+    data = request.get_json()
+    device.is_warning = data['is_warning']
+    device.distance = data['distance']
+    db.session.commit()
+    return jsonify({'message': 'device updated successfully'}), 200
+@devices_bp.route('/device/<int:device_id>/warning_distance', methods=['PUT'])
+def update_warning_distance_device(device_id):
+    device = Device.query.get_or_404(device_id)
+    if not device:
+        return jsonify({'message': 'device none'}), 404
     data = request.get_json()
     device.distance = data['distance']
     db.session.commit()

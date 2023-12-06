@@ -15,8 +15,13 @@ import time
 from schedule import every, repeat, run_pending
 import schedule
 import threading  # Import thư viện threading
+import logging
+from logging.handlers import RotatingFileHandler
 app = Flask(__name__)
 
+handler = RotatingFileHandler("flask_app.log",maxBytes=10000,backupCount=1)
+handler.setLevel(logging.INFO)
+app.logger.addHandler(handler)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///wemeio.db'
 
 cred = credentials.Certificate("key.json")
@@ -30,6 +35,8 @@ my_dict["subscribed"] = set()
 my_dict["my_check_status"] ={}
 my_dict["location_device"] ={}
 my_dict ["tokens"]= {}
+my_dict["deleted_tokens"] = list()
+my_dict ["user_token"]= {}
 with app.app_context():
      db.create_all()
      tokens = Token.query.all()
@@ -155,7 +162,7 @@ def device_added(mapper, connection, target):
         mqtt.client.subscribe(topic)
         my_dict["subscribed"].add(target.token_value)
         my_dict ["tokens"][target.user_id] = target.token_value
-        schedule.every(10).seconds.do(lambda: check_device_status(target.token_value)).tag(target.token_value,target.token_value)
+        # schedule.every(30).seconds.do(lambda: check_device_status(target.token_value)).tag(target.token_value,target.token_value)
 
 @db.event.listens_for(Token, 'after_delete')
 def device_deleted(mapper, connection, target):
@@ -166,8 +173,10 @@ def device_deleted(mapper, connection, target):
     if target.token_value in my_dict["subscribed"]:
         mqtt.client.unsubscribe(topic)
         my_dict["subscribed"].remove(target.token_value)
-        del my_dict ["tokens"][target.user_id]
-        schedule.clear(target.token_value)
+        #del my_dict ["tokens"][target.user_id]
+        # schedule.clear(target.token_value)
+# Thêm thông tin cần thiết vào danh sách đợi để sử dụng sau khi đối tượng bị xóa
+        my_dict["deleted_tokens"].append({"user_id": target.user_id, "token_value": target.token_value})
 @mqtt.on_connect()
 def handle_connect(client, userdata, flags, rc):
     if rc == 0:
@@ -208,7 +217,7 @@ def handle_message(client, userdata, message):
         warning_device_check = search_device__by_token_warning(user_token)
         if len(warning_device_check) > 0 and warning_device_check is not None:
             my_dict["user_token"][user_token] = [cut_str_of_payload(payload),warning_device_check]
-        print(f"Message from user topic '{topic}': {payload}")
+        # print(f"Message from user topic '{topic}': {payload}")
     handle_notify(warning_device_check)
   
     timer = threading.Timer(360000,auto_delete_properties)
@@ -222,8 +231,8 @@ def handle_notify(warning_device_check):
         # Lặp qua từ điển my_token_dict
         for key, value in my_dict["user_token"].items():
             user_value, devices = value
-            print(f"User: '{key}', User value: {user_value}")
-            print(f"User: '{key}', devices: {devices}")
+            # print(f"User: '{key}', User value: {user_value}")
+            # print(f"User: '{key}', devices: {devices}")
             # Lặp qua từng thiết bị trong set devices
             for device in devices:
                 # Kiểm tra xem thiết bị có trong từ điển location_device không
@@ -231,8 +240,8 @@ def handle_notify(warning_device_check):
                     # Lấy thông tin vị trí của thiết bị và lưu vào user_location_dict
                     user_location_dict[device] = my_dict["location_device"][device]
                     location_device=my_dict["location_device"]
-                    print(f"Device: '{device}', Location: {location_device[device]}")
-                    print(f" User: '{key}', User lat: {user_value[0]}, User lng: {user_value[1]}, Device: '{device}', Lat: {location_device[device][0]},Lng: {location_device[device][1]}")
+                    # print(f"Device: '{device}', Location: {location_device[device]}")
+                    # print(f" User: '{key}', User lat: {user_value[0]}, User lng: {user_value[1]}, Device: '{device}', Lat: {location_device[device][0]},Lng: {location_device[device][1]}")
                     distance = haversine(user_value[0],user_value[1],location_device[device][0],location_device[device][1])
 
                     print(f"distance: '{distance}' km")
@@ -240,9 +249,10 @@ def handle_notify(warning_device_check):
                     # t.start
                     with app.app_context():
                         search_device = Device.query.filter_by(name=device).first()
-                        if not search_device.is_status:
-                            send_status_alert(key,device)
-                        send_distance_alert(key,device,distance,search_device.distance)
+                        # if not search_device.is_status:
+                        #     send_status_alert(key,device)
+                        print(f"type of distance {type(search_device.distance)}")
+                        #send_distance_alert(key,device,distance,search_device.distance)
                 else:
                     print(f"Device: '{device}' not found in location_device dictionary")
 def auto_delete_properties() :
@@ -326,25 +336,48 @@ def delete_all_properties():
 #     time.sleep(1)
 def send_distance_alert(user_token,device_name, current_distance, threshold_distance):
     print('send distance alert')
-    current_distance_km = round(current_distance)
     current_distance_m = round(current_distance*1000)
     print(f'current {current_distance}')
     if current_distance_m > threshold_distance:
+        if current_distance_m >= 1000:
+            current_distance_km  = current_distance_m / 1000
+               # Khoảng cách vượt quá ngưỡng, gửi thông báo
+            message = messaging.Message(
+                data={
+                "title":"Distance warning",
+                "body":f"The current distance of {device_name} is {current_distance_km} km.",
+                "type":"distance",
+                },
+            # notification=messaging.Notification(
+            #     title="Distance warning",
+            #     body=f"The current distance of {device_name} is {current_distance_m} m.",
+            # ),
+                token=user_token,
+                message_id=str(hash((user_token,"distance"))),
 
+            )
         # Khoảng cách vượt quá ngưỡng, gửi thông báo
-        message = messaging.Message(
-            notification=messaging.Notification(
-                title="Distance warning",
-                body=f"The current distance of {device_name} is {current_distance_m} m.",
-            ),
+        else :
+            message = messaging.Message(
+                data={
+                    "title":"Distance warning",
+                    "body":f"The current distance of {device_name} is {current_distance_m} m.",
+                    "type":"distance",
+                },
+            # notification=messaging.Notification(
+            #     title="Distance warning",
+            #     body=f"The current distance of {device_name} is {current_distance_m} m.",
+            # ),
             token=user_token,
-        )
+            # message_id=str(hash((user_token,"distance"))),
+
+            )
         try:
             response = messaging.send(message)
             print('send_distance_alert: Successfully sent message:', response)
         except Exception as e:
             print('send_distance_alert: Error sending message:', str(e))
-        time.sleep(10)
+        time.sleep(5)
 
 def haversine(lat1, lon1, lat2, lon2):
     # Chuyển đổi độ sang radian
@@ -400,27 +433,29 @@ def search_device__by_token_warning(token_value):
         return warning_device_names
 def search_code_device_by_token(token_value):
     with app.app_context():
+        device_codes = []
         tokens = Token.query.filter_by(token_value=token_value).first()
         id_user = tokens.user_id
-        print(id_user)
-        user = User.query.get(id_user)
-        devices = user.devices
-        if user is None:
-            return None
-        device_codes = []
-        for device in devices:
-            device_codes.append(device.code)
-        return device_codes
-def check_device_location_status(key):
+        if id_user is not None:
+            user = User.query.get(id_user)
+            devices = user.devices
+            if user is None:
+                return None
+          
+            for device in devices:
+                device_codes.append(device.code)
+            return device_codes
+def check_device_location_status(key,token):
     print(f"check_device_location_status {my_dict['my_check_status'][key]}")
     current_time = time.time()
     time_since_last_message = current_time - my_dict['my_check_status'][key]
-    if time_since_last_message > 20:  # Kiểm tra sau 10 giây không có tin nhắn
+    if time_since_last_message > 30:  # Kiểm tra sau 10 giây không có tin nhắn
         with app.app_context():
             device = Device.query.filter_by(code=key).first()
             if device.is_status:
                 device.is_status = False
                 db.session.commit()
+            send_status_alert(token,device.name)
         print(f"{key} is not active.")       
     else:
         with app.app_context():
@@ -439,20 +474,28 @@ def check_device_status(user_token):
             print(f"value: {value}")
             mqtt.client.publish(f"devices-ping/{value}",f"Hi! device {value}")
             try:
-                check_device_location_status(value)
+                check_device_location_status(value,user_token)
             except Exception as e:
                 print(f"Error: {e}")
 
 def check_thread(value):
-    schedule.every(10).seconds.do(lambda: check_device_status(value)).tag(value,value)
+    schedule.every(30).seconds.do(lambda: check_device_status(value)).tag(value,value)
 def check_thead_full():
     print("check_thead_full")
-    check_threads = []
     # stop_event = threading.Event()
     # Bắt đầu một luồng cho mỗi user_token
     if my_dict is not None:
-        for key, value in my_dict["tokens"].items():
-            check_thread(value)
+        if my_dict["deleted_tokens"] is not None:
+            for deleted_token in my_dict["deleted_tokens"]:
+                user_id = deleted_token["user_id"]
+                token_value = deleted_token["token_value"]
+                schedule.clear(token_value)
+
+                del my_dict["tokens"][user_id]  # Xóa thông tin cần thiết
+                # Xử lý công việc khác sau khi đối tượng đã bị xóa
+        if my_dict["tokens"] is not None:
+            for key, value in my_dict["tokens"].items():
+                check_thread(value)
     # Chờ tất cả các luồng hoàn thành
     # try:
     #     for thread in check_threads:
@@ -461,13 +504,12 @@ def check_thead_full():
     #     stop_event.set()
     while True:
         schedule.run_pending()
-        time.sleep(1)
+        time.sleep(5)
 
 
 # Bắt đầu một luồng cho hàm lắng nghe sự kiện thay đổi trong my_token_dict
 # Bắt đầu luồng chính cho hàm check_thead_full
-check_full_thread = threading.Thread(target=check_thead_full)
-check_thead_full.daemon = True
+check_full_thread = threading.Thread(target=check_thead_full,daemon=True)
 check_full_thread.start()
 mqtt_thread.daemon = True  # Đánh dấu luồng như là một daemon (sẽ dừng khi ứng dụng Flask kết thúc)
 mqtt_thread.start()
@@ -476,16 +518,22 @@ def send_status_alert(user_token,device_name):
     print('send status alert')
      # Khoảng cách vượt quá ngưỡng, gửi thông báo
     message = messaging.Message(
-            notification=messaging.Notification(
-                title="Distance warning",
-                body=f"The  {device_name} is not active.",
-            ),
+            data={
+                "title":"Status Warning",
+                "body":f"The  {device_name} is not active.",
+                "type":"status"
+            },
+            # notification=messaging.Notification(
+            #     title="Status warning",
+            #     body=f"The  {device_name} is not active.",
+            # ),
             token=user_token,
+            # message_id=str(hash((user_token,"status"))),
         )
     try:
             response = messaging.send(message)
-            print('send_distance_alert: Successfully sent message:', response)
+            print('send_status_alert: Successfully sent message:', response)
     except Exception as e:
-            print('send_distance_alert: Error sending message:', str(e))
-    
+            print('send_status_alert: Error sending message:', str(e))
+    time.sleep(2)    
     
