@@ -168,6 +168,7 @@ def device_added(mapper, connection, target):
 @db.event.listens_for(Token, 'after_delete')
 def device_deleted(mapper, connection, target):
     print(f"Token deleted with id {target.id}")
+    print(f"Token deleted with id {target.user_id}")
     topic = f"user/{target.token_value}"
     global my_dict
 
@@ -475,16 +476,19 @@ def search_name_device_by_name(code):
         return name
 def search_device__by_token_warning(token_value):
     with app.app_context():
-        tokens = Token.query.filter_by(token_value=token_value).first()
-        id_user = tokens.user_id
         warning_device_names = []
+        tokens = Token.query.filter_by(token_value=token_value).first()
+        if tokens is None:
+            return warning_device_names
+        id_user = tokens.user_id
         if id_user is None:
             return warning_device_names
         print(id_user)
         user = User.query.get(id_user)
-        devices = user.devices
+
         if user is None:
-            return None
+            return warning_device_names
+        devices = user.devices
         for device in devices:
             if device.is_warning:
                 warning_device_names.append(device.name)
@@ -493,18 +497,18 @@ def search_code_device_by_token(token_value):
     with app.app_context():
         device_codes = []
         tokens = Token.query.filter_by(token_value=token_value).first()
+        if tokens is None:
+            return device_codes
         id_user = tokens.user_id
         if id_user is None:
             return device_codes
-        if id_user is not None:
-            user = User.query.get(id_user)
-            devices = user.devices
-            if user is None:
+        user = User.query.get(id_user)
+        if user is None:
                 return None
-
-            for device in devices:
+        devices = user.devices
+        for device in devices:
                 device_codes.append(device.code)
-            return device_codes
+        return device_codes
 def check_device_location_status(key,token):
     print(f"check_device_location_status {my_dict['my_check_status'][key]}")
     current_time = time.time()
@@ -548,7 +552,6 @@ def check_thead_full():
         if my_dict["deleted_tokens"] is not None:
             for deleted_token in my_dict["deleted_tokens"]:
                 user_id = deleted_token["user_id"]
-
                 if user_id is not None:
                    token_value = deleted_token["token_value"]
                    schedule.clear(token_value)
