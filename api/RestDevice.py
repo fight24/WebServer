@@ -78,6 +78,7 @@ def update_warning_distance_device(device_id):
     if not device:
         return jsonify({'message': 'device none'}), 404
     data = request.get_json()
+    device.distance = data['is_warning']
     device.distance = data['distance']
     db.session.commit()
     return jsonify({'message': 'device updated successfully'}), 200
