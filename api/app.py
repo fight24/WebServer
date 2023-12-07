@@ -253,7 +253,7 @@ def handle_notify(warning_device_check):
                         # if not search_device.is_status:
                         #     send_status_alert(key,device)
                         print(f"type of distance {type(search_device.distance)}")
-                        #send_distance_alert(key,device,distance,search_device.distance)
+                        send_distance_alert(key,device,distance,int(search_device.distance))
                 else:
                     print(f"Device: '{device}' not found in location_device dictionary")
 def auto_delete_properties() :
@@ -477,13 +477,14 @@ def search_device__by_token_warning(token_value):
     with app.app_context():
         tokens = Token.query.filter_by(token_value=token_value).first()
         id_user = tokens.user_id
+        warning_device_names = []
+        if id_user is None:
+            return warning_device_names
         print(id_user)
         user = User.query.get(id_user)
         devices = user.devices
         if user is None:
             return None
-        
-        warning_device_names = []
         for device in devices:
             if device.is_warning:
                 warning_device_names.append(device.name)
@@ -538,7 +539,7 @@ def check_device_status(user_token):
                 print(f"Error: {e}")
 
 def check_thread(value):
-    schedule.every(60).seconds.do(lambda: check_device_status(value)).tag(value,value)
+    schedule.every(30).seconds.do(lambda: check_device_status(value)).tag(value,value)
 def check_thead_full():
     print("check_thead_full")
     # stop_event = threading.Event()
@@ -547,10 +548,12 @@ def check_thead_full():
         if my_dict["deleted_tokens"] is not None:
             for deleted_token in my_dict["deleted_tokens"]:
                 user_id = deleted_token["user_id"]
-                token_value = deleted_token["token_value"]
-                schedule.clear(token_value)
 
-                del my_dict["tokens"][user_id]  # Xóa thông tin cần thiết
+                if user_id is not None:
+                   token_value = deleted_token["token_value"]
+                   schedule.clear(token_value)
+
+                   del my_dict["tokens"][user_id]  # Xóa thông tin cần thiết
                 # Xử lý công việc khác sau khi đối tượng đã bị xóa
         if my_dict["tokens"] is not None:
             for key, value in my_dict["tokens"].items():
@@ -563,7 +566,7 @@ def check_thead_full():
     #     stop_event.set()
     while True:
         schedule.run_pending()
-        time.sleep(10)
+        time.sleep(5)
 
 
 # Bắt đầu một luồng cho hàm lắng nghe sự kiện thay đổi trong my_token_dict
