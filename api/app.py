@@ -17,6 +17,7 @@ import schedule
 import threading  # Import thư viện threading
 import logging
 from logging.handlers import RotatingFileHandler
+from sqlalchemy import desc
 app = Flask(__name__)
 
 handler = RotatingFileHandler("flask_app.log",maxBytes=10000,backupCount=1)
@@ -75,7 +76,7 @@ app.register_blueprint(devices_bp)
 app.register_blueprint(relationShip_bp)
 
 
-app.config['MQTT_BROKER_URL'] = 'petweioapp.online'  # Thay đổi địa chỉ và cổng của MQTT broker
+app.config['MQTT_BROKER_URL'] = 'localhost'  # Thay đổi địa chỉ và cổng của MQTT broker
 app.config['MQTT_BROKER_PORT'] = 1883
 app.config['MQTT_CLIENT_ID'] = 'SERVER_PRO_MAX'
 # app.config['MQTT_USERNAME'] = 'nam'
@@ -268,7 +269,46 @@ def auto_delete_properties() :
 def handle_logging(client, userdata, level, buf):
     print(level,buf)
 
+@app.route('/api/get_50_latest_properties', methods=['GET'])
+def get_50_latest_property_all():
+    # Sắp xếp theo thời gian giảm dần và lấy 50 bản ghi đầu tiên
+    latest_properties = Property.query.order_by(desc(Property.date)).limit(50).all()
+    if not latest_properties:
+        return jsonify({'error': 'No data available for this device'}), 404
+    # Chuyển đổi dữ liệu thành định dạng JSON
+    result = [
+        {
+            "id": prop.id,
+            "topic": prop.topic,
+            "message": prop.message,
+            "date": prop.date.strftime('%Y-%m-%d %H:%M:%S'),
+            "device_id": prop.device_id
+        }
+        for prop in latest_properties
+    ]
 
+    return jsonify(result),200
+@app.route('/api/get_50_latest_property/<device_code>', methods=['GET'])
+def get_50_latest_properties_by_code(device_code):
+    device = Device.query.filter_by(code=device_code).first()
+    if device is None:
+        return jsonify({'error': 'Device not found'}), 404
+
+    latest_properties = Property.query.filter_by(device=device).order_by(desc(Property.date)).limit(50).all()
+    if not latest_properties:
+        return jsonify({'error': 'No data available for this device'}), 404
+
+    r = [
+         {
+            'topic': latest_property.topic,
+            'message': latest_property.message,
+	    'device_id':latest_property.device_id,
+            'date': latest_property.date.strftime('%Y-%m-%d %H:%M:%S'),
+	    'device_code':latest_property.device.code
+        }
+	for latest_property in latest_properties
+    ]
+    return jsonify(r),200
 @app.route('/api/latest_property/<device_code>', methods=['GET'])
 def get_latest_property(device_code):
     device = Device.query.filter_by(code=device_code).first()
@@ -286,7 +326,7 @@ def get_latest_property(device_code):
             'message': latest_property.message,
             'date': latest_property.date.strftime('%Y-%m-%d %H:%M:%S')
         }
-    })
+    }),200
 @app.route('/api/properties/<string:device_code>',methods=['GET'])
 def search_properties_by_code(device_code):
     device = Device.query.filter_by(code = device_code).first()
@@ -298,7 +338,24 @@ def search_properties_by_code(device_code):
                           'date':property.date.strftime('%Y-%m-%d %H:%M:%S')
                           } for property in properties if property.device_id == device.id]
         return jsonify(property_list)
-
+@app.route('/api/properties/',methods=['GET'])
+def get_properties_all():
+    properties = Property.query.all()
+    if not properties:
+        return jsonify({'error': 'Property is empty'}), 404
+    property_list = [{'id':property.id,'topic':property.topic,'message':property.message,
+                          'date':property.date.strftime('%Y-%m-%d %H:%M:%S'),'device_id':property.device_id
+                          } for property in properties]
+    return jsonify(property_list),200
+@app.route('/api/propertiesbytime/',methods=['GET'])
+def get_properties_all_by_time():
+    properties = Property.query.order_by(desc(Property.date)).all()
+    if not properties:
+        return jsonify({'error': 'Property is empty'}), 404
+    property_list = [{'id':property.id,'topic':property.topic,'message':property.message,
+                          'date':property.date.strftime('%Y-%m-%d %H:%M:%S'),'device_id':property.device_id
+                          } for property in properties]
+    return jsonify(property_list),200
 @app.route('/api/properties/delete_all',methods=['DELETE'])
 def delete_all_properties():
         try:
@@ -436,12 +493,14 @@ def search_code_device_by_token(token_value):
         device_codes = []
         tokens = Token.query.filter_by(token_value=token_value).first()
         id_user = tokens.user_id
+        if id_user is None:
+            return device_codes
         if id_user is not None:
             user = User.query.get(id_user)
             devices = user.devices
             if user is None:
                 return None
-          
+
             for device in devices:
                 device_codes.append(device.code)
             return device_codes
@@ -479,7 +538,7 @@ def check_device_status(user_token):
                 print(f"Error: {e}")
 
 def check_thread(value):
-    schedule.every(30).seconds.do(lambda: check_device_status(value)).tag(value,value)
+    schedule.every(60).seconds.do(lambda: check_device_status(value)).tag(value,value)
 def check_thead_full():
     print("check_thead_full")
     # stop_event = threading.Event()
@@ -504,7 +563,7 @@ def check_thead_full():
     #     stop_event.set()
     while True:
         schedule.run_pending()
-        time.sleep(5)
+        time.sleep(10)
 
 
 # Bắt đầu một luồng cho hàm lắng nghe sự kiện thay đổi trong my_token_dict

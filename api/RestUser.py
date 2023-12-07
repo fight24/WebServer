@@ -24,7 +24,7 @@ def get_all_users():
 def create_user():
     data = request.get_json()
     username = data['username']
-    user = User.query.filter_by(username=username)
+    user = User.query.filter_by(username=username).first()
     if user:
         return jsonify({'message': 'User exist'}), 404
     email = data['email']
