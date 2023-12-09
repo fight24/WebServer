@@ -1,6 +1,6 @@
 # app.py
-from flask import Flask,request,abort, jsonify
-from Models import db,Device,Property,User,Token
+from flask import Flask,request,abort, jsonify,redirect
+from Models import db,Device,Property,User,Token,UserRole
 from RestUser import users_bp,bcrypt
 from RestDevice import devices_bp
 from RestRelationship import relationShip_bp
@@ -18,12 +18,22 @@ import threading  # Import thư viện threading
 import logging
 from logging.handlers import RotatingFileHandler
 from sqlalchemy import desc
+from flask_admin import Admin
+from flask_login import login_manager,logout_user,login_user,LoginManager,current_user
+from flask_bcrypt import Bcrypt
+from flask_admin.contrib.sqla import ModelView
+from flask_admin import expose,BaseView
 app = Flask(__name__)
-
+bcrypt = Bcrypt(app)
 handler = RotatingFileHandler("flask_app.log",maxBytes=10000,backupCount=1)
 handler.setLevel(logging.INFO)
 app.logger.addHandler(handler)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///wemeio.db'
+
+import secrets
+
+# Generate a secure random key
+app.secret_key = secrets.token_hex(16)
 
 cred = credentials.Certificate("key.json")
 firebase_admin.initialize_app(cred)
@@ -89,7 +99,69 @@ mqtt_client=mqtt.client
 mqtt_client.username_pw_set('admin24',password='admin24')
 waiting_time = 5
 
+
+# flask -admin && flask-login
+login = LoginManager(app)
+# set optional bootswatch theme
+
+app.config['FLASK_ADMIN_SWATCH'] = 'simplex'
+
+admin = Admin(app, name='Petweio', template_mode='bootstrap3')
+
+
+# Add administrative views here\
+@app.route('/admin-login',methods=['post'])
+def admin_login():
+    username = request.form.get('username')
+    password = request.form.get('password')
+    user = check_login(username=username,password=password)
+    if user:
+        login_user(user=user)
+    return redirect('/admin')
+def check_login(username,password):
+    user = User.query.filter_by(username=username).first()
+    if user and bcrypt.check_password_hash(user.password, password):
+        return user
+
+        
+@login.user_loader
+def load_user(user_id):
+    return get_user_by_id(user_id=user_id)
 # # Bắt đầu luồng MQTT
+def get_user_by_id(user_id):
+    return User.query.get_or_404(user_id)
+class AuthenticatedBaseView(BaseView):
+    def is_accessible(self):
+        return current_user.is_authenticated
+#log out 
+class LogOutView (AuthenticatedBaseView):
+    @expose('/')
+    def index(self):
+        logout_user()
+        return redirect('/admin')
+    def is_accessible(self):
+        return current_user.is_authenticated
+
+#start view
+class StartsView(AuthenticatedBaseView):
+    @expose('/')
+    def index(self):
+        return self.render('admin/start.html')
+    def is_accessible(self):
+        return current_user.is_authenticated
+
+class AuthenticatedModelView(ModelView):
+    def is_accessible(self):
+        return current_user.is_authenticated and current_user.user_role == UserRole.ADMIN  
+
+admin.add_view(AuthenticatedModelView(User,db.session))
+admin.add_view(AuthenticatedModelView(Device,db.session))
+admin.add_view(AuthenticatedModelView(Property,db.session))
+admin.add_view(StartsView(name="start"))
+admin.add_view(LogOutView(name='Log out'))
+
+
+
 def mqtt_thread():
     mqtt.client.connect(mqtt.broker_url, mqtt.broker_port)
 mqtt_thread = threading.Thread(target=mqtt_thread)

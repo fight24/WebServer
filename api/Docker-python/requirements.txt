@@ -5,3 +5,5 @@ schedule
 flask-bcrypt
 flask_mqtt
 gunicorn
+flask-login
+flask_admin

@@ -1,0 +1,22 @@
+{% extends 'admin/base.html' %}
+{% block body %}
+{% if current_user.is_authenticated %}
+<h1 class="text-info">WELCOME <span class="text-danger">{{ current_user.username }}</span> TO OUR WEBSITE !!!</h1>
+{% else %}
+<h1 class="text-info text-center">Sign in as admin user</h1>
+<form method="post" action="{{ url_for('admin_login')}}">
+    <div class="form-group">
+      <label for="username">Username:</label>
+      <input type="text" name="username" placeholder="Enter user name" class="form-control" id="username">
+    </div>
+    <div class="form-group">
+      <label for="pwd">Password:</label>
+      <input type="password" name="password" placeholder="Enter password" class="form-control" id="pwd">
+    </div>
+    <div class="checkbox">
+      <label><input type="checkbox"> Remember me</label>
+    </div>
+    <button type="submit" class="btn btn-default">Submit</button>
+  </form>
+{% endif %}
+{% endblock %}

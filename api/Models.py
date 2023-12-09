@@ -1,6 +1,8 @@
 
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from enum import Enum as UserEnum
+from flask_login import UserMixin
 db = SQLAlchemy()
 
 device_user_association = db.Table(
@@ -18,7 +20,10 @@ user_image_association = db.Table(
     db.Column('user_id',db.Integer,db.ForeignKey('users.id')),
     db.Column('Image_id',db.Integer,db.ForeignKey('image.id'))
 )
-class User(db.Model):
+class UserRole(UserEnum):
+    ADMIN = 1
+    USER = 2
+class User(db.Model,UserMixin):
     __tablename__ = 'users'
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -27,7 +32,7 @@ class User(db.Model):
     img_user = db.Column(db.String(120))
     devices = db.relationship('Device', secondary=device_user_association, back_populates='users')
     images = db.relationship('Image',secondary=user_image_association,back_populates='users')
-
+    user_role = db.Column(db.Enum(UserRole),default=UserRole.USER)
     def __init__(self, username, email,password,img_user):
         self.username = username
         self.email = email
