@@ -23,6 +23,7 @@ from flask_login import login_manager,logout_user,login_user,LoginManager,curren
 from flask_bcrypt import Bcrypt
 from flask_admin.contrib.sqla import ModelView
 from flask_admin import expose,BaseView
+
 app = Flask(__name__)
 bcrypt = Bcrypt(app)
 handler = RotatingFileHandler("flask_app.log",maxBytes=10000,backupCount=1)
@@ -93,11 +94,6 @@ app.config['MQTT_CLIENT_ID'] = 'SERVER_PRO_MAX'
 # app.config['MQTT_PASSWORD'] = 'nam'
 device_name_check = ''
 
-mqtt = Mqtt()
-mqtt.init_app(app)
-mqtt_client=mqtt.client
-mqtt_client.username_pw_set('admin24',password='admin24')
-waiting_time = 5
 
 
 # flask -admin && flask-login
@@ -143,25 +139,43 @@ class LogOutView (AuthenticatedBaseView):
         return current_user.is_authenticated
 
 #start view
-class StartsView(AuthenticatedBaseView):
+class LogAccess(AuthenticatedBaseView):
     @expose('/')
     def index(self):
-        return self.render('admin/start.html')
+        logs = read_log_file('gunicorn_acccess.log')
+        return self.render('admin/gunicorn_access.html',logs=logs)
     def is_accessible(self):
         return current_user.is_authenticated
-
+class LogError(AuthenticatedBaseView):
+    @expose('/')
+    def index(self):
+        logs = read_log_file('gunicorn_error.log')
+        return self.render('admin/gunicorn_error.html',logs=logs)
+    def is_accessible(self):
+        return current_user.is_authenticated
+def read_log_file(file_path):
+    with open(file_path,'r') as file:
+        log_content = file.readlines()
+    return log_content
 class AuthenticatedModelView(ModelView):
     def is_accessible(self):
-        return current_user.is_authenticated and current_user.user_role == UserRole.ADMIN  
-
+        return current_user.is_authenticated and current_user.user_role == UserRole.ADMIN
 admin.add_view(AuthenticatedModelView(User,db.session))
 admin.add_view(AuthenticatedModelView(Device,db.session))
 admin.add_view(AuthenticatedModelView(Property,db.session))
-admin.add_view(StartsView(name="start"))
+admin.add_view(LogAccess(name="LogAccess"))
+admin.add_view(LogError(name="LogError"))
 admin.add_view(LogOutView(name='Log out'))
 
 
 
+mqtt = Mqtt()
+mqtt.init_app(app)
+mqtt_client=mqtt.client
+mqtt_client.username_pw_set('admin24',password='admin24')
+waiting_time = 5
+
+# # Bắt đầu luồng MQTT
 def mqtt_thread():
     mqtt.client.connect(mqtt.broker_url, mqtt.broker_port)
 mqtt_thread = threading.Thread(target=mqtt_thread)
@@ -482,8 +496,7 @@ def send_distance_alert(user_token,device_name, current_distance, threshold_dist
             #     title="Distance warning",
             #     body=f"The current distance of {device_name} is {current_distance_m} m.",
             # ),
-                token=user_token,
-                message_id=str(hash((user_token,"distance"))),
+                token=user_token
 
             )
         # Khoảng cách vượt quá ngưỡng, gửi thông báo
@@ -585,7 +598,7 @@ def check_device_location_status(key,token):
     print(f"check_device_location_status {my_dict['my_check_status'][key]}")
     current_time = time.time()
     time_since_last_message = current_time - my_dict['my_check_status'][key]
-    if time_since_last_message > 30:  # Kiểm tra sau 10 giây không có tin nhắn
+    if time_since_last_message > 60:  # Kiểm tra sau 10 giây không có tin nhắn
         with app.app_context():
             device = Device.query.filter_by(code=key).first()
             if device.is_status:
@@ -615,7 +628,7 @@ def check_device_status(user_token):
                 print(f"Error: {e}")
 
 def check_thread(value):
-    schedule.every(30).seconds.do(lambda: check_device_status(value)).tag(value,value)
+    schedule.every(10).seconds.do(lambda: check_device_status(value)).tag(value,value)
 def check_thead_full():
     print("check_thead_full")
     # stop_event = threading.Event()

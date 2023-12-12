@@ -1,0 +1,9 @@
+{% extends 'admin/base.html' %}
+{% block body %}
+<h1 class="text-center text-danger">Log</h1>
+<ul class="list-group list-group-flush">
+	{% for log in logs %}
+	<li class="list-group-item">{{ log}}</li>
+	{% endfor %}
+</ul>
+{% endblock %}
